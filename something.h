@@ -1,0 +1,17 @@
+#pragma once
+struct wave
+{
+	char riff[4];
+	int filesize;
+	char filetypeheader[4];
+	int formatchunkmarker; //might want to be a char array
+	int formatdatalength;
+	short formatType;
+	short numofChannels;
+	int sampleRate; //this may be a 32 byte integer, so may want to change this, but it seems like it should only be a 32
+	int expression1; //normally this would be calculated, but we're only interpreting files, not encoding them...
+	short expression2; //same as above comment...
+	short bitsPerSample;
+	int dataHeader;
+	int dataSectionSize;
+};
