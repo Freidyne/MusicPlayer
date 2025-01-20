@@ -266,7 +266,7 @@ unsigned long WINAPI mus(LPVOID soundFile)
 			int* filecheck = (int*)data.file;
 			if (data.file == NULL)
 			{
-				printf("%s", "you suck\n");
+				printf("%s", "no file...\n");
 			}
 			else {}
 
@@ -321,7 +321,7 @@ waveFile* parseFile(const char* fileName) //this one is all me. it should really
 	int* filecheck = (int*)file;
 	if (file == NULL)
 	{
-		printf("%s", "you suck\n");
+		printf("%s", "no file found\n");
 	}
 	else {}
 	//before fread we need to malloc the proper amount of memory
@@ -506,7 +506,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	}
 	case WM_LBUTTONDOWN:
 	{
-		OutputDebugStringA((LPCSTR)"why aren't you painting idiot\n"); //get rid of this
+		
 		
 	}
 	case WM_COMMAND:
