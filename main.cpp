@@ -10,6 +10,8 @@
 #pragma comment(lib,"d2d1.lib")
 #include <Uxtheme.h>
 #include <CommCtrl.h>
+#include <shobjidl.h>
+//#include "CDialogEventHandler.h"
 
 
 //Assembled by Jacob Lilly
@@ -42,6 +44,11 @@ bool pause = false;
 bool resume = false;
 int state = STOPPED;
 int PersistentState = STOPPED;
+
+//the path to the song itself
+PWSTR PathToSong = new wchar_t[100];
+//the same thing but better
+const char* nameOfFileTemp = "";
 
 //drawing..
 ID2D1Factory* pD2DFactory = NULL;
@@ -352,6 +359,67 @@ LPCWSTR stringToWide(const char* name) //temporary solution for MP3 filenames fo
 }
 
 
+
+
+HRESULT OpenFileDialog(PWSTR address)
+{
+	const COMDLG_FILTERSPEC c_rgSaveTypes[] =
+	{
+		{L"WAVE file (*.wav)",       L"*.wav"},
+		{L"MPEG3 file (*.mp3)",    L"*.mp3"},
+	};
+	IFileDialog* pfd = NULL;
+	HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd));
+	if (SUCCEEDED(hr))
+	{
+		IFileDialogEvents* pfde = NULL;
+		//hr = CDialogEventHandler_CreateInstance(IID_PPV_ARGS(&pfde));
+		if (SUCCEEDED(hr))
+		{
+			DWORD dwFlags;
+			hr = pfd->GetOptions(&dwFlags);
+			if (SUCCEEDED(hr))
+			{
+				hr = pfd->SetOptions(dwFlags | FOS_FORCEFILESYSTEM);
+				if (SUCCEEDED(hr))
+				{
+					hr = pfd->SetFileTypes(ARRAYSIZE(c_rgSaveTypes), c_rgSaveTypes);
+					if (SUCCEEDED(hr))
+					{
+						//hr = pfd->SetFileTypeIndex(INDEX_WAVEFILE);
+						hr = pfd->SetFileTypeIndex(1);
+						if (SUCCEEDED(hr))
+						{
+							hr = pfd->Show(NULL);
+							if (SUCCEEDED(hr))
+							{
+								IShellItem* psiResult;
+								hr = pfd->GetResult(&psiResult);
+								if (SUCCEEDED(hr))
+								{
+									PWSTR pszFilePath = NULL;
+									hr = psiResult->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
+									psiResult->GetDisplayName(SIGDN_FILESYSPATH, &PathToSong);
+									if (SUCCEEDED(hr))
+									{
+										//PWSTR* returner = new PWSTR;
+										//*returner = pszFilePath; //the value at the value of returner is now the value (the absolute filepath) of pszFilePath
+										//address = *pszFilePath; //i hope tis works
+										TaskDialog(NULL, NULL, L"Dialog", pszFilePath, NULL, TDCBF_OK_BUTTON, TD_INFORMATION_ICON, NULL);
+										CoTaskMemFree(pszFilePath);
+									}
+									psiResult->Release();
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return hr;
+}
+
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
 {
@@ -387,7 +455,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	HWND hwndButton4 = CreateWindowW(L"BUTTON", L"Pause", WS_DISABLED | WS_TABSTOP | WS_CHILD | BS_PUSHBUTTON, 10, 10, 100, 30, hwnd, (HMENU)7, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
 
-	HWND hwndButton2 = CreateWindowW(L"BUTTON", L"Stop/End", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, 200, 10, 100, 30, hwnd, (HMENU)5, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
+	HWND hwndButton2 = CreateWindowW(L"BUTTON", L"Stop/End", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, 210, 10, 100, 30, hwnd, (HMENU)5, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
+
+	HWND fileDialogButton = CreateWindowW(L"BUTTON", L"Browse...", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, 410, 10, 100, 30, hwnd, (HMENU)8, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
 
 	//HWND titleBar = CreateWindowW()
 	//SetThemeAppProperties(STAP_ALLOW_CONTROLS);
@@ -401,6 +471,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	::SendMessage(hwndButton2, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(TRUE, 0));
 	::SendMessage(hwndButton3, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(TRUE, 0));
 	::SendMessage(hwndButton4, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(TRUE, 0));
+	::SendMessage(fileDialogButton, WM_SETFONT, (WPARAM)hFont, MAKELPARAM(TRUE, 0));
 
 	HRESULT hr = D2D1CreateFactory(
 		D2D1_FACTORY_TYPE_SINGLE_THREADED,
@@ -460,7 +531,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-	const char* nameOfFileTemp = "05 Starless.mp3"; //I wonder if japanese characters will work if i dont type them out
+	
 	
 
 
@@ -512,7 +583,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	case WM_COMMAND:
 		if (LOWORD(wParam) == 4) //play, initial
 		{
-			
+
 			if (typeOfFile(nameOfFileTemp) == ITSWAVE)
 			{
 				waveFile* argument1 = parseFile(nameOfFileTemp);
@@ -550,6 +621,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				mciSendString(test, NULL, 0, 0);
 				state = PLAYINGINITIAL;
 				delete wideName;
+			}
+			else {
+				//and this is where you would make an error dialog to say "put a valid file type!"
 			}
 
 		}
@@ -604,6 +678,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				mciSendString(L"pause mp3", NULL, 0, 0);
 			}
 
+		}
+		else if (LOWORD(wParam) == 8) //file dialog
+		{
+			
+			OpenFileDialog(PathToSong);
+			int sz = WideCharToMultiByte(CP_UTF8, 0, PathToSong, -1, NULL, 0, NULL, NULL);
+			char* temp_char_array = new char[sz];
+			WideCharToMultiByte(CP_UTF8, 0, PathToSong, -1, temp_char_array, sz, NULL, NULL);
+			nameOfFileTemp = temp_char_array; //important
+			state = STOPPED;
+			stop = true;
 		}
 		
 	return 0;
