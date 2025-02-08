@@ -11,6 +11,7 @@
 #include <Uxtheme.h>
 #include <CommCtrl.h>
 #include <shobjidl.h>
+#include <tchar.h>
 //#include "CDialogEventHandler.h"
 
 
@@ -50,13 +51,16 @@ PWSTR PathToSong = new wchar_t[100];
 //the same thing but better
 const char* nameOfFileTemp = "";
 
+//a test
+LPCWSTR szText;
+
 //drawing..
 ID2D1Factory* pD2DFactory = NULL;
 ID2D1HwndRenderTarget* pRenderTarget = NULL;
 ID2D1SolidColorBrush* pBrush = NULL;
 
 //images
-HBITMAP hBmp = (HBITMAP)LoadImageW(NULL, L"Background.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
+HBITMAP hBmp = (HBITMAP)LoadImageW(NULL, L"RadioBackdrop.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
 
 typedef struct
 {
@@ -83,6 +87,12 @@ typedef struct
 	wave* header;
 	FILE* file;
 }waveFile;
+
+typedef struct
+{
+	junkwave* header;
+	FILE* file;
+}waveFileAlt;
 
 static ring_buffer_size_t rbs_min(ring_buffer_size_t a, ring_buffer_size_t b)
 {
@@ -216,8 +226,30 @@ static int stopThread(paData* pData) //from portaudio examples
 	return paNoError;
 }
 
+int getBitDepth(short bitsPerSample)
+{
+	switch (bitsPerSample)
+	{
+	case 8:
+		return paInt8;
+		break;
+	case 16:
+		return paInt16;
+		break;
+	case 24:
+		return paInt24;
+		break;
+	case 32:
+		return paInt32;
+		break;
+	}
+
+}
+
 unsigned long WINAPI mus(LPVOID soundFile)
 {
+	int waveType = 0;
+	waveFileAlt* sFile2 = (waveFileAlt*)soundFile;
 	waveFile* sFile = (waveFile*)soundFile;
 	OutputDebugStringA((LPCSTR)"mus function called...\n");
 	PaStreamParameters outputParameters;
@@ -225,12 +257,19 @@ unsigned long WINAPI mus(LPVOID soundFile)
 	PaError err;
 	paData data = { 0 };
 
+	
 	wave* headerInfo = (wave*)sFile->header; //corrupt here.
+	junkwave* headerInfo2 = (junkwave*)sFile2->header;
+	if (headerInfo->formatchunkmarker == 0x4b4e554a) { waveType = 1; }
+
+
 	//paData pauseData = { 0 }; //agony
 	unsigned            numSamples;
 	unsigned            numBytes;
 
 	err = Pa_Initialize();
+
+	//IMPORTANT!! note for later: Some files have different header structures, so we need to check for those before we input them into OpenStream. What goes into the parameter of OpenStream should be the result of a check to distinguish wave file format Types.
 
 	//begin from portaudio examples
 
@@ -250,8 +289,6 @@ unsigned long WINAPI mus(LPVOID soundFile)
 		OutputDebugStringA((LPCSTR)"Failed to initialize ring buffer, not a power of 2 or something...\n");
 		return 0;
 	}
-
-
 	//end from portaudio examples
 
 	data.frameIndex = 0;
@@ -259,13 +296,11 @@ unsigned long WINAPI mus(LPVOID soundFile)
 	outputParameters.device = Pa_GetDefaultOutputDevice(); //write exception for no found device.
 
 	outputParameters.channelCount = 2;
-	outputParameters.sampleFormat = 8;
+	outputParameters.sampleFormat = waveType ? getBitDepth(headerInfo2->bitsPerSample) : getBitDepth(headerInfo->bitsPerSample); //change this based on something, make a whole check for it
 	outputParameters.suggestedLatency = Pa_GetDeviceInfo(outputParameters.device)->defaultLowInputLatency;
 	outputParameters.hostApiSpecificStreamInfo = NULL;
-
-
 	
-		err = Pa_OpenStream(&stream, NULL, &outputParameters, headerInfo->sampleRate, 512, 1, callbacker, &data); //going to need to change some of those numbers to variables passed in...
+		err = Pa_OpenStream(&stream, NULL, &outputParameters, waveType ? headerInfo2->sampleRate : headerInfo->sampleRate, 512, 1, callbacker, &data); //going to need to change some of those numbers to variables passed in...
 		if (stream)
 		{
 			OutputDebugStringA((LPCSTR)"Stream Initiated...\n");
@@ -321,10 +356,39 @@ int typeOfFile(const char* filename)
 	}
 }
 
+int TypeOfWave(const char* fileName)
+{
+	int waveType = 0;
+	FILE* file = fopen(fileName, "rb");
+	wave* holder = new wave;
+	fread(holder, 1, 0x2c, file);
+	if (holder->formatchunkmarker == 0x4b4e554a)
+	{
+		waveType = 1;
+	}
+	delete holder;
+	return waveType;
+}
+
+waveFileAlt* parseFileAlt(const char* fileName)
+{
+	FILE* altFile = fopen(fileName, "rb");
+	junkwave* holderalt = new junkwave;
+	waveFileAlt* completeAlt = new waveFileAlt;
+	junkwave* waveHeaderalt;
+
+	fread(holderalt, 1, 80, altFile);
+	waveHeaderalt = (junkwave*)holderalt;
+	completeAlt->file = altFile;
+	completeAlt->header = waveHeaderalt;
+
+	return completeAlt;
+
+}
+
 waveFile* parseFile(const char* fileName) //this one is all me. it should really be called parseWaveFile, since this couldn't work for any other type of file given the return type.
 {
 	FILE* file = fopen(fileName, "rb"); //remember that this function is relying on an accurate filepath
-
 	int* filecheck = (int*)file;
 	if (file == NULL)
 	{
@@ -336,6 +400,7 @@ waveFile* parseFile(const char* fileName) //this one is all me. it should really
 	wave* holder = new wave; //(wave*)malloc(sizeof(wave));
 	//char* header[0x2c];
 	fread(holder, 1, 0x2c, file); //lets try and take the header into memory...
+
 	wave* waveHeader = (wave*)holder;
 	printf("%d\n", waveHeader->filesize); //how big is the file, also did it work? yes it did.
 	printf("%d\n", waveHeader->formatType);
@@ -358,7 +423,12 @@ LPCWSTR stringToWide(const char* name) //temporary solution for MP3 filenames fo
 	return widenameOfFileTemp;
 }
 
-
+unsigned long WINAPI PlaySoundEffect(LPVOID soundName) //this should only be called from a new thread, this will take up the main thread's time if not, which is bad!
+{
+	LPCWSTR s = (LPCWSTR)soundName;
+	PlaySound(s, NULL, NULL);
+	return 1;
+}
 
 
 HRESULT OpenFileDialog(PWSTR address)
@@ -441,23 +511,22 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 	RegisterClass(&wc);
 
-	HWND hwnd = CreateWindowExW(1, CLASS_NAME, L"Music Player", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL, hInstance, NULL);
+	HWND hwnd = CreateWindowExW(1, CLASS_NAME, L"Music Player", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1088, 598, NULL, NULL, hInstance, NULL);
 	if (hwnd == NULL) { return 0; }
 
 	ShowWindow(hwnd, nCmdShow);
 	UpdateWindow(hwnd);
 
-	
-
-	HWND hwndButton = CreateWindowW(L"BUTTON", L"Play", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_RADIOBUTTON, 10, 10, 100, 30, hwnd, (HMENU)4, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
+	HWND hwndButton = CreateWindowW(L"BUTTON", L"Play", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_RADIOBUTTON, 104, 114, 100, 30, hwnd, (HMENU)4, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
 	//SetWindowTheme(hwndButton, L"Explorer", L"");
-	HWND hwndButton3 = CreateWindowW(L"BUTTON", L"Resume", WS_DISABLED | WS_TABSTOP | WS_CHILD | BS_PUSHBUTTON, 10, 10, 100, 30, hwnd, (HMENU)6, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
+	HWND hwndButton3 = CreateWindowW(L"BUTTON", L"Resume", WS_DISABLED | WS_TABSTOP | WS_CHILD | BS_PUSHBUTTON, 104, 114, 100, 30, hwnd, (HMENU)6, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
 
-	HWND hwndButton4 = CreateWindowW(L"BUTTON", L"Pause", WS_DISABLED | WS_TABSTOP | WS_CHILD | BS_PUSHBUTTON, 10, 10, 100, 30, hwnd, (HMENU)7, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
+	HWND hwndButton4 = CreateWindowW(L"BUTTON", L"Pause", WS_DISABLED | WS_TABSTOP | WS_CHILD | BS_PUSHBUTTON, 104, 114, 100, 30, hwnd, (HMENU)7, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
 
-	HWND hwndButton2 = CreateWindowW(L"BUTTON", L"Stop/End", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, 210, 10, 100, 30, hwnd, (HMENU)5, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
+	HWND hwndButton2 = CreateWindowW(L"BUTTON", L"Stop/End", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, 104, 266, 100, 30, hwnd, (HMENU)5, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
 
-	HWND fileDialogButton = CreateWindowW(L"BUTTON", L"Browse...", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, 410, 10, 100, 30, hwnd, (HMENU)8, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
+	HWND fileDialogButton = CreateWindowW(L"BUTTON", L"Browse...", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON, 910, 154, 100, 30, hwnd, (HMENU)8, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
+
 
 	//HWND titleBar = CreateWindowW()
 	//SetThemeAppProperties(STAP_ALLOW_CONTROLS);
@@ -531,8 +600,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-	
-	
 
 
 	switch (uMsg)
@@ -542,7 +609,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	case WM_DESTROY:
 		PostQuitMessage(0);
 		return 0;
-
+	case WM_SIZE:
+		SetWindowPos(hwnd, HWND_TOP, 0, 0, 1088, 598, SWP_NOMOVE);
 	case WM_PAINT:
 	{
 		PAINTSTRUCT ps;
@@ -555,6 +623,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		SelectObject(hdcMem, hBmp);
 		BitBlt(hdc, 0, 0, bm.bmWidth, bm.bmHeight, hdcMem, 0, 0, SRCCOPY);
 		DeleteDC(hdcMem);
+		RECT rec = { 680, 90, 960, 150 };
+		SetBkMode(hdc, TRANSPARENT);
+		if (szText != NULL)
+		{
+			DrawTextW(hdc, szText, wcslen(szText), &rec, DT_BOTTOM | DT_WORDBREAK);
+		}
 		EndPaint(hwnd, &ps);
 
 		RECT rc;
@@ -583,10 +657,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	case WM_COMMAND:
 		if (LOWORD(wParam) == 4) //play, initial
 		{
-
+			LPCWSTR soundName = L"click.wav";
+			CreateThread(NULL, 0, PlaySoundEffect, (LPVOID)soundName, 0, NULL);
 			if (typeOfFile(nameOfFileTemp) == ITSWAVE)
 			{
-				waveFile* argument1 = parseFile(nameOfFileTemp);
 				//OutputDebugStringA((LPCSTR)"Clicky\n");
 				//PMYDATA pDataArray[3];
 				unsigned long dwThreadIdArray[3];
@@ -596,25 +670,28 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				stop = false;
 				state = PLAYINGINITIAL;
 				PersistentState = PLAYINGINITIAL;
-				CreateThread(NULL, 0, mus, (LPVOID)argument1, 0, &dwThreadIdArray[1]);
+				if (TypeOfWave(nameOfFileTemp) == 0)
+				{
+					waveFile* argument1 = parseFile(nameOfFileTemp);
+					CreateThread(NULL, 0, mus, (LPVOID)argument1, 0, &dwThreadIdArray[1]);
+				}
+				else if (TypeOfWave(nameOfFileTemp) == 1)
+				{
+					waveFileAlt* argument2 = parseFileAlt(nameOfFileTemp);
+					CreateThread(NULL, 0, mus, (LPVOID)argument2, 0, &dwThreadIdArray[1]);
+				}
 			}
 			else if (typeOfFile(nameOfFileTemp) == ITSMPEG)
 			{
 				LPCWSTR wideName = stringToWide(nameOfFileTemp);
-				wchar_t openStr[100] = L"open \"";
+				wchar_t openStr[200] = L"open \"";
 				LPCWSTR firstConcat = wcscat(openStr, wideName);
-				wchar_t endStr[30] = L"\" type mpegvideo alias mp3";
+				wchar_t endStr[200] = L"\" type mpegvideo alias mp3";
 				wchar_t* reOpenStr = (wchar_t*)firstConcat;
 				LPCWSTR secondConcat = wcscat(reOpenStr, endStr);
 				//LPCWSTR commandWFile = L"open \"05 Starless.mp3\" type mpegvideo";
 				
 				mciSendString(secondConcat, NULL, 0, 0);
-				/*
-				wchar_t openStr2[100] = L"play \"";
-				LPCWSTR firstConcat2 = wcscat(openStr2, wideName);
-				wchar_t endStr2[20] = L"\" repeat";
-				wchar_t* reOpenStr2 = (wchar_t*)firstConcat2;
-				LPCWSTR secondConcat2 = wcscat(reOpenStr2, endStr2); */
 				LPCWSTR test = L"play mp3 repeat";
 				//commandWFile = L"play \"05 Starless.mp3\" repeat";
 				
@@ -687,6 +764,25 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			char* temp_char_array = new char[sz];
 			WideCharToMultiByte(CP_UTF8, 0, PathToSong, -1, temp_char_array, sz, NULL, NULL);
 			nameOfFileTemp = temp_char_array; //important
+			//int sz2 = MultiByteToWideChar(CP_UTF8, 0, nameOfFileTemp, -1, NULL, 0); //beginning of attempt title name thing
+			//MultiByteToWideChar(CP_UTF8, 0, nameOfFileTemp, -1, *szText, sz2);
+			const char* nOFT2 = nameOfFileTemp;
+			int szLen1 = strlen(nOFT2);
+			const char* nOFT3 = nullptr;
+			for (int i = szLen1 - 1; i > 0; i--)
+			{
+				if (nOFT2[i] == '\\')
+				{
+					nOFT3 = &nOFT2[i + 1];
+					break;
+				}
+				//write an else
+			}
+			szText = stringToWide(nOFT3);
+			HWND hwndMainW = FindWindowA("Music Window Class", "Music Player");
+			InvalidateRect(hwndMainW, NULL, FALSE);
+			UpdateWindow(hwndMainW);
+			//SendMessage with stop button command, for the sake of mp3s
 			state = STOPPED;
 			stop = true;
 		}
